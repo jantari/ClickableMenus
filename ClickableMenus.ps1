@@ -127,7 +127,10 @@ $hIn  = [ConsoleAPI]::GetStdHandle( [ConsoleAPI]::STD_INPUT_HANDLE )
 class UIForm {
     [uint32]$ID
     [string]$Name
+    [int[]]$X
+    [int[]]$Y
     [bool]$Border
+    [bool]$ClearScreen
     [System.Collections.Generic.List[UIElement]]$Elements = [System.Collections.Generic.List[UIElement]]::new()
 
     Add ([UIElement[]]$Element) {
@@ -137,24 +140,37 @@ class UIForm {
     }
 
     Remove ([UIElement]$Element) {
-        $this.Elements.Remove($Element)
+        foreach ($e in $Element) {
+            $this.Elements.Remove($e)
+        }
     }
 
     [Object] Show () {
-        [console]::Clear()
-        [console]::SetCursorPosition(0, 0)
-        if ($this.Border) {
+        if ($this.ClearScreen) {
+            [console]::Clear()
+        }
+
+        $absoluteYcoords = Get-AbsoluteYCoordinates -Y $this.Y
+
+        [console]::SetCursorPosition($this.X[0], $absoluteYcoords[0])
+        if ($this.Border -or (-not $this.ClearScreen)) {
             # Top edge
-            Write-Host "$script:ESC(0l$('q' * ($global:Host.UI.RawUI.WindowSize.Width - 2))k$script:ESC(B"
+            Write-Host "$script:ESC(0l$('q' * ($this.X[-1] - $this.X[0] - 1))k$script:ESC(B"
             # Sides
-            for ($i = 1; $i -lt $global:Host.UI.RawUI.WindowSize.Height - 1; $i++) {
-                [console]::SetCursorPosition(0, $i)
-                Write-Host "$script:ESC(0x$script:ESC(B"
-                [console]::SetCursorPosition($global:Host.UI.RawUI.WindowSize.Width - 1, $i)
-                Write-Host "$script:ESC(0x$script:ESC(B"
+            for ($i = $absoluteYcoords[1]; $i -lt $absoluteYcoords[-1]; $i++) {
+                if ($this.ClearScreen) {
+                    [console]::SetCursorPosition($this.X[0], $i)
+                    Write-Host "$script:ESC(0x$script:ESC(B"
+                    [console]::SetCursorPosition($this.X[-1], $i)
+                    Write-Host "$script:ESC(0x$script:ESC(B"
+                } else {
+                    [console]::SetCursorPosition($this.X[0], $i)
+                    Write-Host "$script:ESC(0x$(' ' * ($this.X[-1] - $this.X[0] - 1))x$script:ESC(B"
+                }
             }
             # Bottom edge
-            Write-Host "$script:ESC(0m$('q' * ($global:Host.UI.RawUI.WindowSize.Width - 2))j$script:ESC(B"
+            [console]::SetCursorPosition($this.X[0], $absoluteYcoords[-1])
+            Write-Host "$script:ESC(0m$('q' * ($this.X[-1] - $this.X[0] - 1))j$script:ESC(B" -NoNewline
         }
         foreach ($UIElement in $this.Elements) {
             switch ($UIElement.GetType().Name) {
@@ -169,7 +185,7 @@ class UIForm {
                 }
             }
         }
-        [console]::SetCursorPosition(0, 0)
+        #[console]::SetCursorPosition($this.X[0], $absoluteYcoords[0])
         return Wait-UIClick -UIElements $this.Elements
     }
 }
@@ -192,6 +208,58 @@ class UICheckbox : UIElement {
 }
 
 class UILabel : UIElement {}
+
+function New-UIForm {
+    Param (
+        [uint32]$ID = $script:UIElementIDAutoAssign++,
+        [string]$Name,
+        [ValidateScript({ $_ -in 0..([console]::WindowWidth)})]
+        [int[]]$X = 0..([console]::WindowWidth  - 1),
+        [ValidateScript({ $_ -in 0..([console]::WindowHeight)})]
+        [int[]]$Y = 0..([console]::WindowHeight - 1),
+        [switch]$Border,
+        [switch]$ClearScreen,
+        [System.Collections.Generic.List[UIElement]]$Elements = [System.Collections.Generic.List[UIElement]]::new()
+    )
+
+    $UIElementIDsInUse.Add($ID)
+
+    return [UIForm]@{
+        'ID'          = $ID
+        'Name'        = $Name
+        'X'           = $X
+        'Y'           = $Y
+        'Border'      = $Border
+        'ClearScreen' = $ClearScreen
+        'Elements'    = $Elements
+    }
+}
+
+function New-UIButton {
+    Param (
+        [ValidateScript({ $_ -notin $UIElementIDsInUse })]
+        [uint32]$ID = $script:UIElementIDAutoAssign++,
+        [Parameter( Mandatory = $true )]
+        [string]$Text,
+        [int]$X = $host.UI.RawUI.WindowSize.Width  / 2, # Pseudo-Center by default
+        [int]$Y = $host.UI.RawUI.WindowSize.Height / 2, # Center by default
+        [ValidateSet('Underline', 'ColorText', 'ColorElement', 'None')]
+        [string]$HighlightStyle = 'ColorElement',
+        [int]$TextPadding = 4
+    )
+
+    $UIElementIDsInUse.Add($ID)
+    [int]$ButtonLength = $X + $Text.Length + $TextPadding * 2 + 1
+
+    return [UIButton]@{
+        'ID'          = $ID
+        'Text'        = $Text
+        'TextPadding' = $TextPadding
+        'X'           = $X..$ButtonLength
+        'Y'           = $Y..($Y + 2 )
+        'HLStyle'     = $HighlightStyle
+    }
+}
 
 function New-UICheckBox {
     Param (
@@ -221,32 +289,6 @@ function New-UICheckBox {
     }
 }
 
-function New-UIButton {
-    Param (
-        [ValidateScript({ $_ -notin $UIElementIDsInUse })]
-        [uint32]$ID = $script:UIElementIDAutoAssign++,
-        [Parameter( Mandatory = $true )]
-        [string]$Text,
-        [int]$X = $host.UI.RawUI.WindowSize.Width  / 2, # Pseudo-Center by default
-        [int]$Y = $host.UI.RawUI.WindowSize.Height / 2, # Center by default
-        [ValidateSet('Underline', 'ColorText', 'ColorElement', 'None')]
-        [string]$HighlightStyle = 'ColorElement',
-        [int]$TextPadding = 4
-    )
-
-    $UIElementIDsInUse.Add($ID)
-    [int]$ButtonLength = $X + $Text.Length + $TextPadding * 2 + 1
-
-    return [UIButton]@{
-        'ID'          = $ID
-        'Text'        = $Text
-        'TextPadding' = $TextPadding
-        'X'           = $x..$ButtonLength
-        'Y'           = $y..($y + 2 )
-        'HLStyle'     = $HighlightStyle
-    }
-}
-
 function New-UILabel {
     Param (
         [ValidateScript({ $_ -notin $UIElementIDsInUse })]
@@ -272,54 +314,88 @@ function New-UILabel {
 function Show-UIButton {
     Param (
         [Parameter( ValueFromPipeline = $true )]
-        [UIButton[]]$Button
+        [UIButton[]]$Button,
+        [switch]$Highlight
     )
 
-    begin {
-        # Workaround for PS pipeline bug (I'm pretty sure?)
-        [array]$InButtons = @()
-    }
-
     process {
-        $ButtonContent = "$(' ' * $Button.TextPadding)$($Button.Text)$(' ' * $Button.TextPadding)"
+        $ButtonContent  = "$(' ' * $Button.TextPadding)$($Button.Text)$(' ' * $Button.TextPadding)"
+        $absoluteYcoord = Get-AbsoluteYCoordinates -Y $Button.Y
 
-        [console]::SetCursorPosition($Button.X[0], $Button.Y[0])
-        Write-Host "$ESC(0l$("q" * $ButtonContent.Length)k$ESC(B"
-        [console]::SetCursorPosition($Button.X[0], $Button.Y[1])
-        Write-Host "$ESC(0x$ESC(B$ButtonContent$ESC(0x$ESC(B"
-        [console]::SetCursorPosition($Button.X[0], $Button.Y[-1])
-        Write-Host "$ESC(0m$("q" * $ButtonContent.Length)j$ESC(B"
-
-        $InButtons += $Button
-    }
-
-    end {
-        return $InButtons
+        if ($Highlight) {
+            switch ($Button.HLStyle) {
+                'Underline' {
+                    [console]::SetCursorPosition($Button.X[0], $absoluteYcoord[1])
+                    Write-Host "|$(' ' * $Button.TextPadding)$ESC[4m$($Button.Text)$ESC[0m$(' ' * $Button.TextPadding)|"
+                }
+                'ColorElement' {
+                    [console]::SetCursorPosition($Button.X[0], $absoluteYcoord[0])
+                    Write-Host "$('▄' * $Button.X.Count)"
+                    [console]::SetCursorPosition($Button.X[0], $absoluteYcoord[1])
+                    Write-Host " $(' ' * $Button.TextPadding)$($Button.Text)$(' ' * $Button.TextPadding) " -ForegroundColor $Host.UI.RawUI.BackgroundColor -BackgroundColor $Host.UI.RawUI.ForegroundColor
+                    [console]::SetCursorPosition($Button.X[0], $absoluteYcoord[2])
+                    Write-Host "$('▀' * $Button.X.Count)"
+                }
+                'ColorText' {
+                    $ButtonContent = "$(' ' * $Button.TextPadding)$($Button.Text)$(' ' * $Button.TextPadding)"
+                    [console]::SetCursorPosition($Button.X[1], $absoluteYcoord[1])
+                    Write-Host $ButtonContent -ForegroundColor $Host.UI.RawUI.BackgroundColor -BackgroundColor $Host.UI.RawUI.ForegroundColor 
+                }
+                default {}
+            }
+        } else {
+            [console]::SetCursorPosition($Button.X[0], $absoluteYcoord[0])
+            Write-Host "$ESC(0l$("q" * $ButtonContent.Length)k$ESC(B"
+            [console]::SetCursorPosition($Button.X[0], $absoluteYcoord[1])
+            Write-Host "$ESC(0x$ESC(B$ButtonContent$ESC(0x$ESC(B"
+            [console]::SetCursorPosition($Button.X[0], $absoluteYcoord[-1])
+            Write-Host "$ESC(0m$("q" * $ButtonContent.Length)j$ESC(B"
+        }
     }
 }
 
 function Show-UICheckBox {
     Param (
         [Parameter( ValueFromPipeline = $true )]
-        [UICheckbox[]]$Checkbox
+        [UICheckbox[]]$Checkbox,
+        [switch]$Highlight
     )
 
-    begin {
-        [array]$InCheckBoxes = @()
-    }
-
     process {
-        [console]::SetCursorPosition($Checkbox.X[0], $Checkbox.Y[0])
-        if ($Checkbox.Checked) {
-            Write-Host "[X]$(' ' * $Checkbox.TextPadding)$($Checkbox.Text)"
-        } else {
-            Write-Host "[ ]$(' ' * $Checkbox.TextPadding)$($Checkbox.Text)"
-        }
-        $InCheckBoxes += $Checkbox
-    }
+        $absoluteYcoords = Get-AbsoluteYCoordinates -Y $Checkbox.Y
 
-    end {
-        return $InCheckBoxes
+        if ($Highlight) {
+            [console]::SetCursorPosition($Checkbox.X[0], $absoluteYcoords[0])
+            # Always underline for now
+            switch ($Checkbox.HLStyle) {
+                'Underline' {
+                    if ($Checkbox.Checked) {
+                        Write-Host "$ESC[4m[X]$(' ' * $Checkbox.TextPadding)$($Checkbox.Text)$ESC[0m"
+                    } else {
+                        Write-Host "$ESC[4m[ ]$(' ' * $Checkbox.TextPadding)$($Checkbox.Text)$ESC[0m"
+                    }
+                }
+                'ColorElement' {
+                    if ($Checkbox.Checked) {
+                        Write-Host "[X]$(' ' * $Checkbox.TextPadding)$($Checkbox.Text)" -ForegroundColor $Host.UI.RawUI.BackgroundColor -BackgroundColor $Host.UI.RawUI.ForegroundColor
+                    } else {
+                        Write-Host "[ ]$(' ' * $Checkbox.TextPadding)$($Checkbox.Text)" -ForegroundColor $Host.UI.RawUI.BackgroundColor -BackgroundColor $Host.UI.RawUI.ForegroundColor
+                    }
+                }
+                'ColorText' {
+                    [console]::SetCursorPosition($Checkbox.X[2], $absoluteYcoords[0])
+                    Write-Host "$(' ' * $Checkbox.TextPadding)$($Checkbox.Text)" -ForegroundColor $Host.UI.RawUI.BackgroundColor -BackgroundColor $Host.UI.RawUI.ForegroundColor
+                }
+                default {}
+            }
+        } else {
+            [console]::SetCursorPosition($Checkbox.X[0], $absoluteYcoords[0])
+            if ($Checkbox.Checked) {
+                Write-Host "[X]$(' ' * $Checkbox.TextPadding)$($Checkbox.Text)"
+            } else {
+                Write-Host "[ ]$(' ' * $Checkbox.TextPadding)$($Checkbox.Text)"
+            }
+        }
     }
 }
 
@@ -329,19 +405,19 @@ function Show-UILabel {
         [UILabel[]]$Label
     )
 
-    begin {
-        [array]$InLabels = @()
-    }
-
     process {
-        [console]::SetCursorPosition($Label.X[0], $Label.Y[0])
+        $absoluteYcoords = Get-AbsoluteYCoordinates -Y $Label.Y
+        [console]::SetCursorPosition($Label.X[0], $absoluteYcoords[0])
         Write-Host $Label.Text
-        $InLabels += $Label
     }
+}
 
-    end {
-        return $InLabels
-    }
+function Get-AbsoluteYCoordinates {
+    Param (
+        [int[]]$Y
+    )
+
+    return $Y.ForEach({ $_ + [console]::WindowTop })
 }
 
 function Reset-UIElementIDs {
@@ -379,55 +455,14 @@ function Wait-UIClick {
             if ($lpBuffer.MouseEvent.dwEventFlags -eq 1) {
                 # Mouse move event
                 foreach ($UIElement in $UIElements) {
-                    if (($lpBuffer.MouseEvent.dwMousePosition.X -in $UIElement.X) -and ($lpBuffer.MouseEvent.dwMousePosition.Y -in $UIElement.Y)) {
+                    if (($lpBuffer.MouseEvent.dwMousePosition.X -in $UIElement.X) -and ($lpBuffer.MouseEvent.dwMousePosition.Y -in (Get-AbsoluteYCoordinates -Y $UIElement.Y))) {
                         # Mouse is over top of UIElement - highlight it
                         switch ($UIElement.GetType().Name) {
                             'UIButton' {
-                                [console]::SetCursorPosition($UIElement.X[0], $UIElement.Y[1])
-                                switch ($UIElement.HLStyle) {
-                                    'Underline' {
-                                        Write-Host "|$(' ' * $UIElement.TextPadding)$ESC[4m$($UIElement.Text)$ESC[0m$(' ' * $UIElement.TextPadding)|"
-                                    }
-                                    'ColorElement' {
-                                        [console]::SetCursorPosition($UIElement.X[0], $UIElement.Y[0])
-                                        Write-Host "$('▄' * $UIElement.X.Count)"
-                                        [console]::SetCursorPosition($UIElement.X[0], $UIElement.Y[1])
-                                        Write-Host " $(' ' * $UIElement.TextPadding)$($UIElement.Text)$(' ' * $UIElement.TextPadding) " -ForegroundColor $Host.UI.RawUI.BackgroundColor -BackgroundColor $Host.UI.RawUI.ForegroundColor
-                                        [console]::SetCursorPosition($UIElement.X[0], $UIElement.Y[2])
-                                        Write-Host "$('▀' * $UIElement.X.Count)"
-                                    }
-                                    'ColorText' {
-                                        $ButtonContent = "$(' ' * $UIElement.TextPadding)$($UIElement.Text)$(' ' * $UIElement.TextPadding)"
-                                        [console]::SetCursorPosition($UIElement.X[1], $UIElement.Y[1])
-                                        Write-Host $ButtonContent -ForegroundColor $Host.UI.RawUI.BackgroundColor -BackgroundColor $Host.UI.RawUI.ForegroundColor 
-                                    }
-                                    default {}
-                                }
+                                $null = Show-UIButton -Button $UIElement -Highlight
                             }
                             'UICheckbox' {
-                                [console]::SetCursorPosition($UIElement.X[0], $UIElement.Y[0])
-                                # Always underline for now
-                                switch ($UIElement.HLStyle) {
-                                    'Underline' {
-                                        if ($UIElement.Checked) {
-                                            Write-Host "$ESC[4m[X]$(' ' * $Checkbox.TextPadding)$($Checkbox.Text)$ESC[0m"
-                                        } else {
-                                            Write-Host "$ESC[4m[ ]$(' ' * $Checkbox.TextPadding)$($Checkbox.Text)$ESC[0m"
-                                        }
-                                    }
-                                    'ColorElement' {
-                                        if ($UIElement.Checked) {
-                                            Write-Host "[X]$(' ' * $Checkbox.TextPadding)$($Checkbox.Text)" -ForegroundColor $Host.UI.RawUI.BackgroundColor -BackgroundColor $Host.UI.RawUI.ForegroundColor
-                                        } else {
-                                            Write-Host "[ ]$(' ' * $Checkbox.TextPadding)$($Checkbox.Text)" -ForegroundColor $Host.UI.RawUI.BackgroundColor -BackgroundColor $Host.UI.RawUI.ForegroundColor
-                                        }
-                                    }
-                                    'ColorText' {
-                                        [console]::SetCursorPosition($UIElement.X[2], $UIElement.Y[0])
-                                        Write-Host "$(' ' * $Checkbox.TextPadding)$($Checkbox.Text)" -ForegroundColor $Host.UI.RawUI.BackgroundColor -BackgroundColor $Host.UI.RawUI.ForegroundColor
-                                    }
-                                    default {}
-                                }
+                                $null = Show-UICheckBox -Checkbox $UIElement -Highlight
                             }
                         }
                     } else {
@@ -445,7 +480,7 @@ function Wait-UIClick {
             } elseif ($lpBuffer.MouseEvent.dwButtonState -eq 0x01) {
                 # single left click event
                 foreach ($UIElement in $UIElements) {
-                    if (($lpBuffer.MouseEvent.dwMousePosition.X -in $UIElement.X) -and ($lpBuffer.MouseEvent.dwMousePosition.Y -in $UIElement.Y)) {
+                    if (($lpBuffer.MouseEvent.dwMousePosition.X -in $UIElement.X) -and ($lpBuffer.MouseEvent.dwMousePosition.Y -in (Get-AbsoluteYCoordinates -Y $UIElement.Y))) {
                         # Mouse was over top of UIElement when click occured
                         switch ($UIElement.GetType().Name) {
                             'UIButton' {
@@ -470,9 +505,9 @@ function Wait-UIClick {
 
     end {
         # Restore default console behaviour
+        [console]::SetCursorPosition(0, [console]::WindowTop + [console]::WindowHeight)
         $null = [ConsoleAPI]::SetConsoleMode($hIn, $oldConMode)
         [console]::CursorVisible = $true
-
         return $formReturnValue
     }
 }

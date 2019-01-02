@@ -9,7 +9,7 @@ This PowerShell module lets you create very simple but clickable menus in the Po
 The UI shown in the title GIF was created like this:
 
 ```powershell
-$form1      = [UIForm]@{ID = 0; Name = 'Form1'; Border = $true}
+$form1      = New-UIForm -Name 'Form1' -Border
 $button1    = New-UIButton -Text "Accept" -X 4
 $button2    = New-UIButton -Text "Decline" -X 22
 $checkboxes = @(
