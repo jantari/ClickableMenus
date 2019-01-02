@@ -6,7 +6,6 @@ using System.Runtime.InteropServices;
 
 public class ConsoleAPI
 {
-    ////////////////////////////////////////////////////////////////////////
     [StructLayout(LayoutKind.Sequential)]
     public struct COORD
     {
@@ -113,7 +112,6 @@ public class ConsoleAPI
 
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
-    ////////////////////////////////////////////////////////////////////////
 }
 "@
 
@@ -121,11 +119,8 @@ Add-Type $consoleAPI
 
 [char]$ESC = 0x1b
 
-[uint32]$UIElementIDAutoAssign = 1
+[uint32]$UIElementIDAutoAssign = 0
 $UIElementIDsInUse = [System.Collections.Generic.List[uint32]]::new()
-# Button ID 0 is returned when the user exits a form with ESCAPE
-# instead of pressing one of the provided buttons
-$UIElementIDsInUse.Add(0)
 
 $hIn  = [ConsoleAPI]::GetStdHandle( [ConsoleAPI]::STD_INPUT_HANDLE )
 
@@ -145,7 +140,7 @@ class UIForm {
         $this.Elements.Remove($Element)
     }
 
-    [UIElement] Show () {
+    [Object] Show () {
         [console]::Clear()
         [console]::SetCursorPosition(0, 0)
         if ($this.Border) {
@@ -366,7 +361,7 @@ function Wait-UIClick {
         # ENABLE_EXTENDED_FLAGS 0x0080
         # ENABLE_WINDOW_INPUT   0x0008
         [uint32]$oldConMode  =  0
-        $ClickedOnButton     = -1
+        $formReturnValue     = -1
         [bool]$ClickOccurred = $false
         $null = [ConsoleAPI]::GetConsoleMode($hIn, [ref]$oldConMode)
         $null = [ConsoleAPI]::SetConsoleMode($hIn, 0x0010 -bor 0x0080 -bor 0x0008)
@@ -454,7 +449,7 @@ function Wait-UIClick {
                         # Mouse was over top of UIElement when click occured
                         switch ($UIElement.GetType().Name) {
                             'UIButton' {
-                                $ClickedOnButton = $UIElement
+                                $formReturnValue = $UIElement
                                 # This will break the loop
                                 $ClickOccurred = $true
                             }
@@ -467,7 +462,7 @@ function Wait-UIClick {
                 }
             } elseif ($lpBuffer.KeyEvent.wVirtualKeyCode -eq 0x1B) {
                 # User pressed ESCAPE, we'll return the buttonID 0
-                $ClickedOnButton = [UIElement]@{'ID' = 0; 'Text' = 'User quit with ESCAPE key'}
+                $formReturnValue = -1
                 $ClickOccurred = $true
             }
         }
@@ -478,6 +473,6 @@ function Wait-UIClick {
         $null = [ConsoleAPI]::SetConsoleMode($hIn, $oldConMode)
         [console]::CursorVisible = $true
 
-        return $ClickedOnButton
+        return $formReturnValue
     }
 }

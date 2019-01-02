@@ -24,7 +24,7 @@ $form1.Add( $(New-UILabel -Text "Test your might!" -X 4 -Y 6) )
 $usrButtonPress = $form1.Show()
 ```
 
-The `.Show()` method of a `[UIForm]` returns the button the Form was quit with (Button ID 0 if the form was quit with the ESCAPE key). Checkboxes by contrast are manipulated live in memory as the user checks and unchecks them. This means checking a `$checkbox` and aborting with ESCAPE will still leave the `$checkbox.Checked` as `$true`. Forms can only be quit with ESCAPE or a Button-press.
+The `.Show()` method of a `[UIForm]` returns the button the Form was quit with (ID -1 if the form was quit with the ESCAPE key). Checkboxes by contrast are manipulated live in memory as the user checks and unchecks them. This means checking a `$checkbox` and aborting with ESCAPE will still leave the `$checkbox.Checked` as `$true`. Forms can only be quit with ESCAPE or a Button-press.
 
 This behavior means that the recommended way to parse the users input is:
 ```powershell
@@ -39,7 +39,7 @@ switch ($usrButtonPress.Text) {
 
     }
     default {
-        # It is important to cover default (or Button ID 0)
+        # It is important to cover default (or $usrButtonPress.ID -eq -1)
         # because this is what happens when the user quits with ESC
     }
 }
