@@ -118,6 +118,7 @@ public class ConsoleAPI
 Add-Type $consoleAPI
 
 [char]$ESC = 0x1b
+[bool]$QUIT_FORM = $false
 
 [uint32]$UIElementIDAutoAssign = 0
 $UIElementIDsInUse = [System.Collections.Generic.List[uint32]]::new()
@@ -200,11 +201,37 @@ class UIElement {
 
 class UIButton : UIElement {
     [string]$HLStyle
+    [bool]$QuitsForm = $false
+    [scriptblock]$ClickScript
+    [Object] Click([System.Object[]] $args) {
+        if ($this.QuitsForm) {
+            $script:QUIT_FORM = $true
+            return $this
+        } elseif ($this.ClickScript) {
+            return $this.ClickScript.Invoke($args)
+        } else {
+            return 0
+        }
+    }
+    [Object] Click () {
+        if ($this.QuitsForm) {
+            $script:QUIT_FORM = $true
+            return $this
+        } elseif ($this.ClickScript) {
+            return $this.ClickScript.Invoke()
+        } else {
+            return 0
+        }
+    }
 }
 
 class UICheckbox : UIElement {
     [string]$HLStyle
     [bool]$Checked
+}
+
+class UIComboBox : UIElement {
+    [System.Collections.Generic.List[string]]$Items
 }
 
 class UILabel : UIElement {}
@@ -241,6 +268,8 @@ function New-UIButton {
         [uint32]$ID = $script:UIElementIDAutoAssign++,
         [Parameter( Mandatory = $true )]
         [string]$Text,
+        [switch]$QuitsForm,
+        [scriptblock]$ClickScript,
         [int]$X = $host.UI.RawUI.WindowSize.Width  / 2, # Pseudo-Center by default
         [int]$Y = $host.UI.RawUI.WindowSize.Height / 2, # Center by default
         [ValidateSet('Underline', 'ColorText', 'ColorElement', 'None')]
@@ -254,6 +283,8 @@ function New-UIButton {
     return [UIButton]@{
         'ID'          = $ID
         'Text'        = $Text
+        'QuitsForm'   = $QuitsForm
+        'ClickScript' = $ClickScript
         'TextPadding' = $TextPadding
         'X'           = $X..$ButtonLength
         'Y'           = $Y..($Y + 2 )
@@ -438,14 +469,13 @@ function Wait-UIClick {
         # ENABLE_WINDOW_INPUT   0x0008
         [uint32]$oldConMode  =  0
         $formReturnValue     = -1
-        [bool]$ClickOccurred = $false
         $null = [ConsoleAPI]::GetConsoleMode($hIn, [ref]$oldConMode)
         $null = [ConsoleAPI]::SetConsoleMode($hIn, 0x0010 -bor 0x0080 -bor 0x0008)
         [console]::CursorVisible = $false
     }
 
     process {
-        while (-not $ClickOccurred) {
+        while (-not $QUIT_FORM) {
             $lpBuffer = New-Object ConsoleAPI+INPUT_RECORD
             do {
                 $null = [ConsoleAPI]::ReadConsoleInput($hIn, [ref]$lpBuffer, 1, [ref]1)
@@ -484,9 +514,7 @@ function Wait-UIClick {
                         # Mouse was over top of UIElement when click occured
                         switch ($UIElement.GetType().Name) {
                             'UIButton' {
-                                $formReturnValue = $UIElement
-                                # This will break the loop
-                                $ClickOccurred = $true
+                                $formReturnValue = $UIElement.Click()
                             }
                             'UICheckbox' {
                                 $UIElement.Checked = -not $UIElement.Checked
@@ -496,9 +524,9 @@ function Wait-UIClick {
                     }
                 }
             } elseif ($lpBuffer.KeyEvent.wVirtualKeyCode -eq 0x1B) {
-                # User pressed ESCAPE, we'll return the buttonID 0
+                # User pressed ESCAPE, we'll return -1
                 $formReturnValue = -1
-                $ClickOccurred = $true
+                $QUIT_FORM = $true
             }
         }
     }
