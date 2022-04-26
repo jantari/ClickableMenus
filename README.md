@@ -1,6 +1,6 @@
 # Clickable Menus for PowerShell
 
-A PowerShell module to create very simple but mouse-clickable menus in the PowerShell console.
+A proof of concept PowerShell module to create very simple but mouse-clickable menus in the PowerShell console.
 
 ![Example showcasing clickable menu](headerGIF.gif "Example of a clickable menu")
 
@@ -58,6 +58,7 @@ if ($checkboxes[0].Checked) {
 ### Do not use this Module for anything serious!
 
 It calls Win32 APIs without proper error handling, it's a little messy all around and in general - it's "GUIs" in an automation language.
+I just created it because I thought one day that this *should work* so I tried it - and it did :)
 
 Because [PowerShell V5 classes are a little troublesome in proper PowerShell Modules](https://stackoverflow.com/questions/31051103/how-to-export-a-class-in-powershell-v5-module)
 this script is provided as a single .ps1 file meant to be dot-sourced and not a proper .psm1 Module - for now please import it like this:
